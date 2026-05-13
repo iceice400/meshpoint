@@ -3,9 +3,12 @@
 Encapsulates three things the rest of ``server.py`` shouldn't have
 to know about:
 
-1. Auto-generating ``jwt_secret`` on first run and persisting it to
-   ``local.yaml`` via ``save_section_to_yaml`` (preserves any other
-   ``web_auth`` keys).
+1. Auto-generating ``jwt_secret`` in memory on first run when none
+   is configured. The secret is NOT written to ``local.yaml`` here;
+   ``AuthService.complete_setup`` persists it together with the
+   admin password hash so a fresh install with no admin password
+   yet leaves the on-disk config untouched (the setup wizard treats
+   that as a true fresh install).
 2. Wiring ``PasswordHasher`` / ``JwtSessionService`` / ``LockoutTracker``
    into a single ``AuthService`` instance.
 3. Returning the ``JwtSessionService`` separately so ``init_auth``
@@ -25,7 +28,7 @@ from src.api.auth.auth_service import AuthService
 from src.api.auth.jwt_session import JwtSessionService
 from src.api.auth.lockout_tracker import LockoutTracker
 from src.api.auth.password_hasher import PasswordHasher
-from src.config import AppConfig, save_section_to_yaml
+from src.config import AppConfig, WebAuthConfig, save_section_to_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -59,15 +62,22 @@ def build_auth_subsystem(config: AppConfig) -> AuthSubsystem:
     return AuthSubsystem(service=auth_service, jwt_service=jwt_service)
 
 
-def _ensure_jwt_secret(web_auth) -> None:
-    """Generate and persist a secret on first run if none is set."""
+def _ensure_jwt_secret(web_auth: WebAuthConfig) -> None:
+    """Generate a secret in memory if none is configured.
+
+    Deliberately does NOT persist. ``AuthService.complete_setup``
+    writes ``jwt_secret`` to ``local.yaml`` alongside the admin
+    password hash so a fresh install only creates ``local.yaml``
+    when the user has actually configured something. Restarting
+    before ``/setup`` regenerates the in-memory secret, which is
+    safe because no admin password exists yet -- no session can be
+    issued, so there is nothing to invalidate.
+    """
     if web_auth.jwt_secret:
         return
-    secret = JwtSessionService.generate_secret()
-    web_auth.jwt_secret = secret
-    save_section_to_yaml("web_auth", {"jwt_secret": secret})
+    web_auth.jwt_secret = JwtSessionService.generate_secret()
     logger.info(
-        "web_auth: generated jwt_secret on first run; persisted to local.yaml"
+        "web_auth: generated jwt_secret in memory; will persist on /setup"
     )
 
 

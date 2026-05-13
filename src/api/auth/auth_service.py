@@ -88,6 +88,11 @@ class AuthService:
     def complete_setup(self, password: str) -> SetupSuccess | SetupRejected:
         """Hash the supplied password and persist it as the admin hash.
 
+        Also writes ``jwt_secret`` so a fresh install picks up its
+        in-memory bootstrap secret on the same disk write -- avoids
+        polluting ``local.yaml`` before the user has actually
+        configured anything (see ``auth_bootstrap``).
+
         Returns ``SetupRejected`` if setup has already happened (LAN
         attacker prevention) or if the password fails the policy check.
         """
@@ -99,7 +104,10 @@ class AuthService:
 
         hashed = self._hasher.hash(password)
         self._config.admin_password_hash = hashed
-        self._persist({"admin_password_hash": hashed})
+        self._persist({
+            "admin_password_hash": hashed,
+            "jwt_secret": self._config.jwt_secret,
+        })
         token = self._jwt.issue(subject="admin", role=ROLE_ADMIN)
         return SetupSuccess(token=token)
 
